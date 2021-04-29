@@ -8,13 +8,14 @@ import android.graphics.ImageFormat
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
+import android.media.Image
 import android.media.ImageReader
-import android.os.Build
-import android.os.IBinder
+import android.os.*
 import android.support.v4.app.NotificationCompat
 import android.util.Log
 import android.util.Size
 import android.view.*
+import java.io.*
 import java.util.*
 import kotlin.Exception
 import kotlin.collections.ArrayList
@@ -48,13 +49,18 @@ class CamService: Service() {
             session: CameraCaptureSession,
             request: CaptureRequest,
             partialResult: CaptureResult
-        ) {}
+        ) {
+            Log.d("asdf", "onCaptureProgressed")
+        }
 
         override fun onCaptureCompleted(
             session: CameraCaptureSession,
             request: CaptureRequest,
             result: TotalCaptureResult
-        ) {}
+        ) {
+            Log.d("asdf", "onCaptureCompleted")
+
+        }
     }
 
     private val surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -288,6 +294,45 @@ class CamService: Service() {
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
             }
 
+            val reader = ImageReader.newInstance(640, 480, ImageFormat.JPEG, 1);
+            val outputSurfaces = ArrayList<Surface>(2);
+            outputSurfaces.add(reader.getSurface())
+
+            val thread = HandlerThread("CameraPicture")
+            thread.start()
+            val backgroundHandler = Handler(thread.looper)
+
+            val readerListener = ImageReader.OnImageAvailableListener {
+                var image: Image? = null
+                try {
+                    image = it.acquireLatestImage()
+                    Log.d("asdf", "image: ${image}")
+                    val buffer = image.planes[0].buffer
+                    Log.d("asdf", "buffer: ${buffer}")
+                    var bytes = ByteArray(buffer.capacity())
+                    Log.d("asdf", "bytes: ${bytes}")
+                    buffer.get(bytes)
+                    val file = File(Environment.getExternalStorageDirectory(), "pic.jpg")
+                    Log.d("asdf", "file: ${file.absoluteFile}")
+                    val output = FileOutputStream(file)
+                    output.write(bytes)
+                    if (output != null) {
+                        output.close()
+                    }
+                } catch (e: FileNotFoundException) {
+                    e.printStackTrace()
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                } finally {
+                    if (image != null) {
+                        image.close()
+                        it.close()
+                    }
+                }
+            }
+            reader.setOnImageAvailableListener(readerListener, backgroundHandler)
+
+
             // Prepare CameraCaptureSession
             cameraDevice!!.createCaptureSession(targetSurfaces,
                 object : CameraCaptureSession.StateCallback() {
@@ -302,7 +347,8 @@ class CamService: Service() {
                         try {
                             // Now we can start capturing
                             captureRequest = requestBuilder!!.build()
-                            captureSession!!.setRepeatingRequest(captureRequest!!, captureCallback, null)
+                            captureSession!!.capture(captureRequest!!, captureCallback, backgroundHandler)
+//                            captureSession!!.setRepeatingRequest(captureRequest!!, captureCallback, null)
 
                         } catch (e: CameraAccessException) {
                             Log.e(TAG, "createCaptureSession", e)
